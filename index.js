@@ -511,5 +511,5 @@ app.post("/api/shoes/:id/deduct", async (req, res) => {
   }
 });
 
-const PORT = process.env.REACT_APP_BACKEND_URL;
+const PORT = process.env.REACT_APP_BACKEND_URL || "https://inventory-backend-gpon.onrender.com";
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
