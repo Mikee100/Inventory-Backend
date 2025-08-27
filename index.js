@@ -82,6 +82,216 @@ const salesSchema = new mongoose.Schema({
 });
 const Sale = mongoose.model("Sale", salesSchema);
 
+
+// Dashboard Statistics
+app.get('/api/dashboard/stats', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    // Build sale query only if date filter is present
+    let saleQuery = {};
+    if (startDate || endDate) {
+      saleQuery.date = {};
+      if (startDate) saleQuery.date.$gte = new Date(startDate);
+      if (endDate) saleQuery.date.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+    }
+
+    // Get all products and sales
+    const [shoes, bags, dresses, sales] = await Promise.all([
+      Shoes.find({}),
+      Bags.find({}),
+      Dresses.find({}),
+      Object.keys(saleQuery).length > 0
+        ? Sale.find(saleQuery).sort({ date: 1 })
+        : Sale.find({}).sort({ date: 1 })
+    ]);
+
+    const allProducts = [...shoes, ...bags, ...dresses];
+    const salesData = sales.filter(sale => sale.type === 'deduct');
+    const restockData = sales.filter(sale => sale.type === 'add');
+
+    // Calculate summary statistics
+    const summary = {
+      totalProducts: allProducts.length,
+      totalStock: allProducts.reduce((sum, p) => sum + p.stock, 0),
+      totalValue: allProducts.reduce((sum, p) => sum + (p.price * p.stock), 0),
+      totalSales: salesData.reduce((sum, s) => sum + s.quantity, 0),
+      totalRevenue: salesData.reduce((sum, s) => sum + s.total, 0),
+      totalRestocked: restockData.reduce((sum, r) => sum + r.quantity, 0)
+    };
+
+    // Sales by category
+    const salesByCategory = {};
+    salesData.forEach(sale => {
+      salesByCategory[sale.category] = (salesByCategory[sale.category] || 0) + sale.quantity;
+    });
+
+    // Sales trend (last 7 days)
+    const today = new Date();
+    const salesTrend = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+
+      const daySales = salesData.filter(sale =>
+        sale.date.toISOString().split('T')[0] === dateStr
+      );
+
+      salesTrend.push({
+        date: dateStr,
+        sales: daySales.reduce((sum, s) => sum + s.quantity, 0),
+        revenue: daySales.reduce((sum, s) => sum + s.total, 0)
+      });
+    }
+
+    // Low stock items
+    const lowStockItems = allProducts
+      .filter(p => p.stock <= 5)
+      .sort((a, b) => a.stock - b.stock)
+      .slice(0, 5)
+      .map(p => ({
+        name: p.name,
+        stock: p.stock,
+        price: p.price,
+        category: p.constructor.modelName
+      }));
+
+    // Top selling products
+    const productSales = {};
+    salesData.forEach(sale => {
+      productSales[sale.name] = (productSales[sale.name] || 0) + sale.quantity;
+    });
+    const topSelling = Object.entries(productSales)
+      .map(([name, quantity]) => {
+        const productSalesArr = salesData.filter(s => s.name === name);
+        return {
+          name,
+          quantity,
+          revenue: productSalesArr.reduce((sum, s) => sum + s.total, 0)
+        };
+      })
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5);
+
+    // Stock value by category
+    const stockValueByCategory = {};
+    allProducts.forEach(product => {
+      const category = product.constructor.modelName;
+      stockValueByCategory[category] = (stockValueByCategory[category] || 0) + (product.price * product.stock);
+    });
+
+    res.json({
+      summary,
+      salesByCategory,
+      salesTrend,
+      lowStockItems,
+      topSelling,
+      stockValueByCategory
+    });
+
+  } catch (error) {
+    console.error('Error fetching dashboard stats:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard statistics' });
+  }
+});
+// Inventory Status
+app.get('/api/dashboard/inventory-status', async (req, res) => {
+  try {
+    const [shoes, bags, dresses] = await Promise.all([
+      Shoes.find({}),
+      Bags.find({}),
+      Dresses.find({})
+    ]);
+
+    const allProducts = [...shoes, ...bags, ...dresses];
+    
+    // Stock status
+    const stockStatus = {
+      inStock: allProducts.filter(p => p.stock > 0).length,
+      lowStock: allProducts.filter(p => p.stock > 0 && p.stock <= 5).length,
+      outOfStock: allProducts.filter(p => p.stock === 0).length
+    };
+
+    // Stock value by category
+    const stockValueByCategory = {};
+    allProducts.forEach(product => {
+      const category = product.constructor.modelName;
+      stockValueByCategory[category] = (stockValueByCategory[category] || 0) + (product.price * product.stock);
+    });
+
+    res.json({
+      totalProducts: allProducts.length,
+      stockStatus,
+      stockValueByCategory
+    });
+  } catch (error) {
+    console.error('Error fetching inventory status:', error);
+    res.status(500).json({ error: 'Failed to fetch inventory status' });
+  }
+});
+
+// Sales Analytics
+app.get('/api/dashboard/sales-analytics', async (req, res) => {
+  try {
+    const { period = 'month' } = req.query;
+    const now = new Date();
+    const startDate = new Date(now);
+    
+    switch (period) {
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'year':
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+      default:
+        startDate.setMonth(now.getMonth() - 1);
+    }
+
+    const sales = await Sale.find({
+      date: { $gte: startDate },
+      type: 'deduct'
+    }).sort({ date: 1 });
+
+    // Group sales by time period
+    const groupedSales = {};
+    sales.forEach(sale => {
+      let key;
+      if (period === 'week') {
+        key = sale.date.toISOString().split('T')[0]; // Daily for week view
+      } else if (period === 'month') {
+        key = `Week ${Math.ceil(sale.date.getDate() / 7)}`; // Weekly for month view
+      } else {
+        key = sale.date.toLocaleString('default', { month: 'short' }); // Monthly for year view
+      }
+      
+      if (!groupedSales[key]) {
+        groupedSales[key] = { sales: 0, revenue: 0 };
+      }
+      groupedSales[key].sales += sale.quantity;
+      groupedSales[key].revenue += sale.total;
+    });
+
+    res.json({
+      period,
+      startDate,
+      endDate: now,
+      data: groupedSales
+    });
+  } catch (error) {
+    console.error('Error fetching sales analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch sales analytics' });
+  }
+});
+
+///End of Dashboard Stats
+
+
+
 // Shoes CRUD
 app.get("/api/shoes", async (req, res) => {
   // Pagination
@@ -560,6 +770,10 @@ app.get("/api/dresses/grouped", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+//dashboard stats
+
+// Add these new routes to your existing index.js file
 
 
 
