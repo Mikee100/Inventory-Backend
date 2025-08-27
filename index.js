@@ -7,7 +7,9 @@ const path = require("path");
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: "http://localhost:5173"
+}));
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
@@ -95,6 +97,21 @@ app.get("/api/shoes", async (req, res) => {
     total,
     totalPages: Math.ceil(total / limit),
   });
+});
+app.get("/api/shoes/grouped", async (req, res) => {
+  
+  try {
+    const shoes = await Shoes.find();
+    const grouped = {};
+    shoes.forEach((shoe) => {
+      if (!grouped[shoe.name]) grouped[shoe.name] = [];
+      grouped[shoe.name].push(shoe);
+    });
+    res.json(grouped);
+  } catch (err) {
+    console.error("Grouped shoes error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get single shoe by ID
@@ -361,7 +378,7 @@ app.post("/api/dresses/:id/add", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// ...existing code...
+// Deduct stock from a dress
 app.post("/api/dresses/:id/deduct", async (req, res) => {
   try {
     const { quantity } = req.body;
@@ -510,6 +527,41 @@ app.post("/api/shoes/:id/deduct", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
+
+// Group Bags by Name
+app.get("/api/bags/grouped", async (req, res) => {
+  try {
+    const bags = await Bags.find();
+    const grouped = bags.reduce((acc, bag) => {
+      acc[bag.name] = acc[bag.name] || [];
+      acc[bag.name].push(bag);
+      return acc;
+    }, {});
+    res.json(grouped);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Group Dresses by Name
+app.get("/api/dresses/grouped", async (req, res) => {
+  try {
+    const dresses = await Dresses.find();
+    const grouped = dresses.reduce((acc, dress) => {
+      acc[dress.name] = acc[dress.name] || [];
+      acc[dress.name].push(dress);
+      return acc;
+    }, {});
+    res.json(grouped);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
