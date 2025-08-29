@@ -512,6 +512,16 @@ app.post("/api/bags/:id/deduct", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.delete('/api/bags/:id', async (req, res) => {
+  try {
+    const deleted = await Bags.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: "Bag not found" });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.get("/api/dresses/:id", async (req, res) => {
   try {
     const dress = await Dresses.findById(req.params.id);
@@ -635,6 +645,17 @@ app.get("/api/dresses", async (req, res) => {
       total,
       totalPages: Math.ceil(total / limit),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.delete('/api/dresses/:id', async (req, res) => {
+  try {
+    const deleted = await Dresses.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: "Dress not found" });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
